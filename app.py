@@ -2,26 +2,22 @@ import streamlit as st
 from openai import OpenAI
 import os
 import time
+import base64
 
 # Initialize OpenAI client (correct for new SDK)
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
-# ---------------------------------
-# CSS OVERRIDE — FORCE CENTERING
-# ---------------------------------
-st.markdown(
-    """
-    <style>
-        .centered-logo {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            width: 100%;
-        }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+# -----------------------------
+# Load Logo as Base64 (Always Displays)
+# -----------------------------
+def load_logo():
+    try:
+        with open("logo.png", "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except Exception:
+        return None
+
+logo_base64 = load_logo()
 
 # -----------------------------
 # System Prompt (ASCII ONLY)
@@ -44,16 +40,19 @@ st.set_page_config(
 )
 
 # -----------------------------
-# Display Centered Logo
+# Display Centered Logo (Base64)
 # -----------------------------
-st.markdown(
-    """
-    <div class="centered-logo">
-        <img src="logo.png" width="180">
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+if logo_base64:
+    st.markdown(
+        f"""
+        <div style='display: flex; justify-content: center; margin-top: 15px; margin-bottom: 5px;'>
+            <img src="data:image/png;base64,{logo_base64}" width="180">
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+else:
+    st.warning("Logo file not found. Ensure 'logo.png' is in repository root.")
 
 # -----------------------------
 # Header Section
@@ -96,7 +95,9 @@ if st.button("Run Analysis", use_container_width=True):
             Run the full analysis according to the system instructions.
             """
 
+            # -----------------------------
             # CORRECT OPENAI CALL FOR NEW SDK
+            # -----------------------------
             response = client.chat.completions.create(
                 model="gpt-4.1",
                 messages=[
@@ -113,13 +114,15 @@ if st.button("Run Analysis", use_container_width=True):
             # -----------------------------
             result_box.markdown(
                 f"""
-                <div style='padding: 20px; border-radius: 10px; background-color: #f7f9fc; border: 1px solid #dfe3e8;'>
-                <h3 style='color: #1a73e8;'>Model Output</h3>
-                <pre style='white-space: pre-wrap; font-size: 15px;'>{output}</pre>
+                <div style='padding: 20px; border-radius: 10px; background-color: #f7f9fc; border: 1px solid #dfe3e8; margin-top: 10px;'>
+                    <h3 style='color: #1a73e8;'>Model Output</h3>
+                    <pre style='white-space: pre-wrap; font-size: 15px;'>{output}</pre>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
 
+            # Copyable code block
             st.code(output, language='text')
+
             st.success("Analysis complete. You can copy the model output above using the copy button.")
