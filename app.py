@@ -51,22 +51,18 @@ def normalize_team_name(name):
 def fuzzy_match_team(user_input, espn_team_names):
     user_clean = normalize_team_name(user_input)
 
-    # Exact
     for t in espn_team_names:
         if normalize_team_name(t) == user_clean:
             return t
 
-    # Partial
     for t in espn_team_names:
         if user_clean in normalize_team_name(t):
             return t
 
-    # Reverse partial
     for t in espn_team_names:
         if normalize_team_name(t) in user_clean:
             return t
 
-    # Abbreviations
     for t in espn_team_names:
         abbr = "".join([w[0] for w in t.split() if w])
         if user_clean == abbr.lower():
@@ -154,35 +150,27 @@ def extract_live_odds_for_game(odds_data, t1, t2):
         away = game.get("away_team", "").lower()
 
         if (t1 in home or t1 in away) and (t2 in home or t2 in away):
-            best_spread = None
-            best_total = None
-            best_ml = None
+            best_spread, best_total, best_ml = None, None, None
 
             for book in game.get("bookmakers", []):
                 for m in book.get("markets", []):
                     key = m["key"]
 
-                    # Spread
                     if key == "spreads":
                         try:
-                            o = sorted(m["outcomes"], key=lambda x: abs(x["point"]))[0]
-                            best_spread = o
+                            best_spread = sorted(m["outcomes"], key=lambda x: abs(x["point"]))[0]
                         except:
                             pass
 
-                    # Total
                     if key == "totals":
                         try:
                             best_total = m["outcomes"][0]
                         except:
                             pass
 
-                    # ML
                     if key == "h2h":
                         try:
-                            best_ml = sorted(
-                                m["outcomes"], key=lambda x: x["price"]
-                            )[0]
+                            best_ml = sorted(m["outcomes"], key=lambda x: x["price"])[0]
                         except:
                             pass
 
@@ -191,6 +179,7 @@ def extract_live_odds_for_game(odds_data, t1, t2):
                 "best_total": best_total,
                 "best_ml": best_ml,
             }
+
     return None
 
 # ============================================================
@@ -206,7 +195,6 @@ Blend:
 - Momentum, pace
 - ATS + O/U recommendations
 - Confidence (0–100%)
-
 Prioritize live data 60%, pregame 40%.
 """
 
@@ -244,7 +232,7 @@ Return:
             ],
             temperature=0.4,
         )
-        return resp.choices[0].message["content"]
+        return resp.choices[0].message.content
     except Exception as e:
         return f"GPT Error: {e}"
 
@@ -382,24 +370,19 @@ def run_ui():
     if mode == "Live In-Game":
         st.autorefresh(interval=AUTO_REFRESH_INTERVAL_MS)
 
-    # User clicked Run
     if run_button:
-        # VALIDATION
         if "vs" not in game_input.lower():
             st.error("Format must be: Team1 vs Team2")
             return
 
         team1, team2 = [x.strip() for x in game_input.split("vs")]
 
-        # Set session state
         st.session_state["should_run_pipeline"] = True
         st.session_state["team1"] = team1
         st.session_state["team2"] = team2
         st.session_state["mode"] = mode
 
-        # Rerun (CORRECT STREAMLIT FUNCTION)
         st.rerun()
-
 
 # ============================================================
 # Module 10 — Main Execution Engine
