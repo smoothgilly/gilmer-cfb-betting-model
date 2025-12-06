@@ -6,6 +6,23 @@ import time
 # Initialize OpenAI client (correct for new SDK)
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
+# ---------------------------------
+# CSS OVERRIDE — FORCE CENTERING
+# ---------------------------------
+st.markdown(
+    """
+    <style>
+        .centered-logo {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 # -----------------------------
 # System Prompt (ASCII ONLY)
 # -----------------------------
@@ -26,18 +43,17 @@ st.set_page_config(
     page_icon="🏈",
 )
 
-# Display logo
+# -----------------------------
+# Display Centered Logo
+# -----------------------------
 st.markdown(
     """
-    <div style='text-align: center;'>
-        <img src='logo.png' width='180'>
+    <div class="centered-logo">
+        <img src="logo.png" width="180">
     </div>
     """,
     unsafe_allow_html=True
 )
-
-
-
 
 # -----------------------------
 # Header Section
@@ -92,7 +108,9 @@ if st.button("Run Analysis", use_container_width=True):
 
             output = response.choices[0].message.content
 
+            # -----------------------------
             # Output box
+            # -----------------------------
             result_box.markdown(
                 f"""
                 <div style='padding: 20px; border-radius: 10px; background-color: #f7f9fc; border: 1px solid #dfe3e8;'>
