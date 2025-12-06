@@ -675,6 +675,294 @@ def render_live_scoreboard(live):
     """
 
     st.markdown(html, unsafe_allow_html=True)
+# ============================================================
+# SEGMENT E — EPA MOMENTUM ENGINE (Hybrid Drive + Play Model)
+# ============================================================
+
+# ============================================================
+# Expected Points Curve (NCAA Approximation)
+# ============================================================
+# This is a simplified EP model for use without proprietary data.
+# Values tuned for CFB scoring distribution.
+EP_CURVE = [
+    (80, 99, 0.2),
+    (60, 79, 0.7),
+    (40, 59, 1.5),
+    (20, 39, 2.8),
+    (1, 19, 4.7),
+]
+
+
+def expected_points_from_yardline(yl):
+    """
+    Converts yardline (distance from opponent endzone) to EP estimate.
+    Yardline values from ESPN situation are typically distance TO endzone.
+    """
+    if yl is None:
+        return 0.0
+
+    try:
+        yl = int(yl)
+    except:
+        return 0.0
+
+    for low, high, ep in EP_CURVE:
+        if low <= yl <= high:
+            return ep
+
+    return 0.0
+
+
+# ============================================================
+# SUCCESS RATE MODEL
+# ============================================================
+def compute_success_rate(plays):
+    """
+    Computes offensive success rate:
+    1st down: gain ≥ 50% of needed yards
+    2nd down: gain ≥ 70%
+    3rd/4th: gain 100%
+    """
+    if not plays:
+        return 0.0
+
+    successes = 0
+    total = 0
+
+    for p in plays:
+        try:
+            down = p.get("down")
+            dist = p.get("distance")
+            yds = p.get("yards", 0)
+
+            if down is None or dist is None:
+                continue
+
+            total += 1
+
+            if down == 1 and yds >= 0.5 * dist:
+                successes += 1
+            elif down == 2 and yds >= 0.7 * dist:
+                successes += 1
+            elif down in (3, 4) and yds >= dist:
+                successes += 1
+
+        except:
+            continue
+
+    return successes / total if total else 0.0
+
+
+# ============================================================
+# EXPLOSIVENESS METRIC
+# ============================================================
+def compute_explosiveness(plays):
+    """
+    Explosiveness = weighted count of plays > 10, 20, 30 yards
+    """
+    if not plays:
+        return 0.0
+
+    score = 0
+    for p in plays:
+        yds = p.get("yards", 0)
+        if yds >= 30:
+            score += 3
+        elif yds >= 20:
+            score += 2
+        elif yds >= 10:
+            score += 1
+
+    return score
+
+
+# ============================================================
+# PLAY-BY-PLAY EPA CALCULATION
+# ============================================================
+def compute_play_epa(plays):
+    """
+    Computes EPA from plays when play-by-play is available.
+    Uses yardline → EP differential.
+    """
+    if not plays:
+        return None
+
+    epa_total = 0.0
+    count = 0
+
+    for p in plays:
+        try:
+            yl_start = p.get("yardLine")
+            yl_end = p.get("endYardLine")
+            ep_start = expected_points_from_yardline(yl_start)
+            ep_end = expected_points_from_yardline(yl_end)
+            epa_total += (ep_end - ep_start)
+            count += 1
+        except:
+            continue
+
+    if count == 0:
+        return None
+
+    return epa_total
+
+
+# ============================================================
+# DRIVE-LEVEL EPA
+# ============================================================
+def compute_drive_epa(drive):
+    """
+    Drive-level EPA used when play data missing.
+    Uses start/end field position + drive result.
+    """
+    start_yl = drive.get("startYardLine")
+    end_yl = drive.get("endYardLine")
+    result = drive.get("result", "").lower()
+
+    ep_start = expected_points_from_yardline(start_yl)
+    ep_end = expected_points_from_yardline(end_yl)
+
+    # Scoring adjustment
+    if "touchdown" in result:
+        ep_end += 7.0
+    elif "field goal" in result:
+        ep_end += 3.0
+    elif "interception" in result or "fumble" in result:
+        ep_end -= 2.0
+
+    return ep_end - ep_start
+
+
+# ============================================================
+# HYBRID EPA AGGREGATION
+# ============================================================
+def compute_team_epa_momentum(drives):
+    """
+    Computes:
+        - success rate
+        - explosiveness
+        - EPA (hybrid)
+        - pace (seconds/play)
+        - momentum score
+    """
+    if not drives:
+        return {
+            "epa": 0,
+            "success_rate": 0,
+            "explosiveness": 0,
+            "pace": 0,
+            "momentum_score": 0,
+            "drives": [],
+        }
+
+    team_stats = {
+        "epa": 0.0,
+        "success_rate": 0.0,
+        "explosiveness": 0.0,
+        "pace": 0.0,
+        "drives": [],
+    }
+
+    total_plays = 0
+    total_seconds = 0
+    success_list = []
+    explosiveness_list = []
+    epa_list = []
+
+    for d in drives:
+        plays = d.get("plays", [])
+        success = compute_success_rate(plays)
+        explosive = compute_explosiveness(plays)
+
+        # Play-by-play EPA preferred
+        epa_play = compute_play_epa(plays)
+        if epa_play is not None:
+            epa = epa_play
+        else:
+            epa = compute_drive_epa(d)
+
+        # Pace
+        if plays:
+            first = plays[0].get("clockSeconds")
+            last = plays[-1].get("clockSeconds")
+            if first is not None and last is not None:
+                total_seconds += abs(first - last)
+                total_plays += len(plays)
+
+        success_list.append(success)
+        explosiveness_list.append(explosive)
+        epa_list.append(epa)
+
+        team_stats["drives"].append({
+            "success_rate": success,
+            "explosiveness": explosive,
+            "epa": epa,
+        })
+
+    team_stats["success_rate"] = sum(success_list) / len(success_list)
+    team_stats["explosiveness"] = sum(explosiveness_list)
+    team_stats["epa"] = sum(epa_list)
+
+    team_stats["pace"] = (total_seconds / total_plays) if total_plays else 0
+
+    # Momentum Score ∈ [-100, 100]
+    m = (
+        (team_stats["epa"] * 8)
+        + (team_stats["success_rate"] * 40)
+        + (team_stats["explosiveness"] * 3)
+        - (team_stats["pace"])
+    )
+    m = max(-100, min(100, m))
+    team_stats["momentum_score"] = m
+
+    return team_stats
+
+
+# ============================================================
+# GAME-LEVEL EPA MOMENTUM WRAPPER
+# ============================================================
+def compute_epa_momentum_package(event):
+    """
+    Reads ESPN event → extracts drives and plays → computes EPA metrics.
+    """
+    try:
+        comp = event["competitions"][0]
+        drives = comp.get("drives", {}).get("previous", [])
+
+        # Split drives by offense
+        team1 = comp["competitors"][0]["team"]["displayName"]
+        team2 = comp["competitors"][1]["team"]["displayName"]
+
+        off_drives_team1 = [d for d in drives if d.get("team", {}).get("displayName") == team1]
+        off_drives_team2 = [d for d in drives if d.get("team", {}).get("displayName") == team2]
+
+        t1_stats = compute_team_epa_momentum(off_drives_team1)
+        t2_stats = compute_team_epa_momentum(off_drives_team2)
+
+        momentum_delta = t1_stats["momentum_score"] - t2_stats["momentum_score"]
+
+        package = {
+            "team1": {
+                "name": team1,
+                **t1_stats
+            },
+            "team2": {
+                "name": team2,
+                **t2_stats
+            },
+            "momentum_summary": (
+                f"{team1} momentum = {t1_stats['momentum_score']:.1f}, "
+                f"{team2} momentum = {t2_stats['momentum_score']:.1f}, "
+                f"Δ = {momentum_delta:+.1f}"
+            ),
+            "momentum_score_delta": momentum_delta,
+        }
+
+        return package
+
+    except Exception as e:
+        return {"error": f"EPA momentum extraction failed: {e}"}
+
 
 
 # ------------------------------------------------------------
