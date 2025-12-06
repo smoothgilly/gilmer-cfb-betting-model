@@ -140,15 +140,15 @@ def extract_top_play(model_output):
 
 
 # ---------------------------------------------------------
-# Generate UTF-8 Safe PDF (FPDF2)
+# Generate UTF-8 Safe PDF (FPDF2 + Bold font fix)
 # ---------------------------------------------------------
 def generate_pdf(game_title, summary_tuple, full_analysis, logo_base64):
     pdf = FPDF()
     pdf.add_page()
 
-    # Register UTF-8 font
+    # Register UTF-8 fonts: regular + bold
     pdf.add_font("DejaVu", "", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", uni=True)
-    pdf.set_font("DejaVu", "", 14)
+    pdf.add_font("DejaVu", "B", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", uni=True)
 
     # Title
     pdf.set_font("DejaVu", "B", 18)
@@ -168,7 +168,7 @@ def generate_pdf(game_title, summary_tuple, full_analysis, logo_base64):
     pdf.set_font("DejaVu", "B", 14)
     pdf.cell(0, 10, game_title, ln=True)
 
-    # Summary box with border
+    # Summary box border
     ats, ou, conf = summary_tuple
     pdf.set_draw_color(180, 180, 180)
     pdf.rect(10, pdf.get_y(), 190, 28)
@@ -180,11 +180,11 @@ def generate_pdf(game_title, summary_tuple, full_analysis, logo_base64):
     pdf.cell(0, 8, f"Confidence: {conf}", ln=True)
     pdf.ln(5)
 
-    # Full Analysis
+    # Full analysis
     pdf.set_font("DejaVu", "", 11)
     pdf.multi_cell(0, 6, full_analysis)
 
-    # Footer
+    # Footer tagline
     pdf.ln(6)
     pdf.set_font("DejaVu", "I", 10)
     pdf.cell(0, 8, "If you can outperform this model, you should be selling your own.", ln=True, align="C")
@@ -221,7 +221,7 @@ if st.button("Run Analysis", use_container_width=True):
             # Summary extraction
             ats, ou, conf = extract_top_play(full_output)
 
-            # SUMMARY BOX (Top of app)
+            # SUMMARY BOX
             summary_box.markdown(
                 f"""
                 <div style='padding:15px; background-color:#1A1A1A; border:1px solid #333; border-radius:10px;'>
@@ -234,7 +234,7 @@ if st.button("Run Analysis", use_container_width=True):
                 unsafe_allow_html=True
             )
 
-            # FULL ANALYSIS
+            # FULL ANALYSIS BOX
             result_box.markdown(
                 f"""
                 <div style='padding:20px; background-color:#1A1A1A; border:1px solid #333; border-radius:10px; margin-top:15px;'>
