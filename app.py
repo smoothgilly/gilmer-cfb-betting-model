@@ -382,19 +382,23 @@ def run_ui():
     if mode == "Live In-Game":
         st.autorefresh(interval=AUTO_REFRESH_INTERVAL_MS)
 
-        if run_button:
+    # User clicked Run
+    if run_button:
+        # VALIDATION
         if "vs" not in game_input.lower():
             st.error("Format must be: Team1 vs Team2")
             return
 
-        t1, t2 = [x.strip() for x in game_input.split("vs")]
+        team1, team2 = [x.strip() for x in game_input.split("vs")]
 
+        # Set session state
         st.session_state["should_run_pipeline"] = True
-        st.session_state["team1"] = t1
-        st.session_state["team2"] = t2
+        st.session_state["team1"] = team1
+        st.session_state["team2"] = team2
         st.session_state["mode"] = mode
 
-        st.rerun()   # <— FIXED
+        # Rerun (CORRECT STREAMLIT FUNCTION)
+        st.rerun()
 
 
 # ============================================================
