@@ -8,13 +8,13 @@ from datetime import datetime
 
 
 # ---------------------------------------------------------
-# Initialize OpenAI client (will use your Streamlit secret)
+# Initialize OpenAI client (Streamlit secret)
 # ---------------------------------------------------------
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 
 # ---------------------------------------------------------
-# DARK MODE THEME (DM1 Matte Black)
+# DARK MODE THEME (DM1)
 # ---------------------------------------------------------
 st.markdown(
     """
@@ -23,14 +23,12 @@ st.markdown(
             background-color: #0D0D0D !important;
             color: #EAEAEA !important;
         }
-
         .stTextInput>div>div>input,
         .stSelectbox>div>div>div {
             background-color: #1C1C1C !important;
             color: #EAEAEA !important;
             border: 1px solid #333333 !important;
         }
-
         .stButton>button {
             background-color: #1A73E8 !important;
             color: white !important;
@@ -38,11 +36,9 @@ st.markdown(
             padding: 0.5rem 1rem !important;
             border: none !important;
         }
-
         h1, h2, h3, h4 {
             color: #EAEAEA !important;
         }
-
         hr {
             border: 1px solid #333333 !important;
         }
@@ -59,7 +55,7 @@ def load_logo():
     try:
         with open("logo.png", "rb") as f:
             return base64.b64encode(f.read()).decode()
-    except Exception:
+    except:
         return None
 
 logo_base64 = load_logo()
@@ -88,7 +84,7 @@ st.set_page_config(
 
 
 # ---------------------------------------------------------
-# Display Centered Logo
+# Display Logo
 # ---------------------------------------------------------
 if logo_base64:
     st.markdown(
@@ -140,15 +136,16 @@ def extract_top_play(model_output):
 
 
 # ---------------------------------------------------------
-# Generate UTF-8 Safe PDF (FPDF2 + Bold font fix)
+# Generate UTF-8 Safe PDF (FPDF2)
 # ---------------------------------------------------------
 def generate_pdf(game_title, summary_tuple, full_analysis, logo_base64):
     pdf = FPDF()
     pdf.add_page()
 
-    # Register UTF-8 fonts: regular + bold
+    # Register all required fonts (Regular, Bold, Italic)
     pdf.add_font("DejaVu", "", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", uni=True)
     pdf.add_font("DejaVu", "B", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", uni=True)
+    pdf.add_font("DejaVu", "I", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf", uni=True)
 
     # Title
     pdf.set_font("DejaVu", "B", 18)
@@ -168,7 +165,7 @@ def generate_pdf(game_title, summary_tuple, full_analysis, logo_base64):
     pdf.set_font("DejaVu", "B", 14)
     pdf.cell(0, 10, game_title, ln=True)
 
-    # Summary box border
+    # Summary box
     ats, ou, conf = summary_tuple
     pdf.set_draw_color(180, 180, 180)
     pdf.rect(10, pdf.get_y(), 190, 28)
@@ -189,9 +186,10 @@ def generate_pdf(game_title, summary_tuple, full_analysis, logo_base64):
     pdf.set_font("DejaVu", "I", 10)
     pdf.cell(0, 8, "If you can outperform this model, you should be selling your own.", ln=True, align="C")
 
-    pdf_path = "report.pdf"
-    pdf.output(pdf_path)
-    return pdf_path
+    # Save PDF
+    output_path = "report.pdf"
+    pdf.output(output_path)
+    return output_path
 
 
 # ---------------------------------------------------------
@@ -218,10 +216,10 @@ if st.button("Run Analysis", use_container_width=True):
 
             full_output = response.choices[0].message.content
 
-            # Summary extraction
+            # Extract summary
             ats, ou, conf = extract_top_play(full_output)
 
-            # SUMMARY BOX
+            # Summary box (top)
             summary_box.markdown(
                 f"""
                 <div style='padding:15px; background-color:#1A1A1A; border:1px solid #333; border-radius:10px;'>
@@ -234,7 +232,7 @@ if st.button("Run Analysis", use_container_width=True):
                 unsafe_allow_html=True
             )
 
-            # FULL ANALYSIS BOX
+            # Full output
             result_box.markdown(
                 f"""
                 <div style='padding:20px; background-color:#1A1A1A; border:1px solid #333; border-radius:10px; margin-top:15px;'>
@@ -245,7 +243,7 @@ if st.button("Run Analysis", use_container_width=True):
                 unsafe_allow_html=True
             )
 
-            # PDF EXPORT
+            # PDF Export
             pdf_file = generate_pdf(game, (ats, ou, conf), full_output, logo_base64)
             with open(pdf_file, "rb") as f:
                 pdf_box.download_button(
