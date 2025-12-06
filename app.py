@@ -1,6 +1,6 @@
 # ============================================================
 # Gilmer CFB Betting Intelligence Model V3.0
-# Hybrid Pregame + Live In-Game ATS & O/U Prediction Engine
+# Hybrid Pregame + Live ATS & O/U Prediction Engine
 # Engineered by Matthew Gilmer
 # ============================================================
 
@@ -15,76 +15,68 @@ from datetime import datetime
 from fpdf import FPDF
 from openai import OpenAI
 
-# -----------------------------
-# API Clients & Secrets
-# -----------------------------
-client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-ODDS_API_KEY = os.environ.get("ODDS_API_KEY")  # stored safely in Streamlit Secrets
+# ------------------------------------------------------------
+# Initialize session state
+# ------------------------------------------------------------
+if "should_run_pipeline" not in st.session_state:
+    st.session_state["should_run_pipeline"] = False
 
-# -----------------------------
+# ------------------------------------------------------------
+# API Clients & Secrets
+# ------------------------------------------------------------
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+ODDS_API_KEY = os.environ.get("ODDS_API_KEY")
+
+# ------------------------------------------------------------
 # Constants
-# -----------------------------
+# ------------------------------------------------------------
 ESPN_SCOREBOARD_URL = "https://site.web.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard"
 ODDS_API_URL = (
     "https://api.the-odds-api.com/v4/sports/americanfootball_ncaaf/odds"
     "?regions=us&markets=h2h,spreads,totals&oddsFormat=american"
 )
-AUTO_REFRESH_INTERVAL_MS = 15000  # 15-second refresh for live mode
+AUTO_REFRESH_INTERVAL_MS = 15000  # 15 seconds refresh
 
 # ============================================================
-# Module 2 — Fuzzy Team Matching Engine
+# Module 2 — Fuzzy Matching Engine
 # ============================================================
 
 def normalize_team_name(name):
-    """
-    Clean and normalize team names for fuzzy comparison.
-    """
     if not name:
         return ""
     name = name.lower().strip()
-    name = re.sub(r"[^a-z0-9 ]", "", name)  # remove punctuation
+    name = re.sub(r"[^a-z0-9 ]", "", name)
     return name
 
-
 def fuzzy_match_team(user_input, espn_team_names):
-    """
-    Attempt to match user-entered team name with ESPN-provided names.
-    Uses partial matches, abbreviations, and nickname matching.
-    """
     user_clean = normalize_team_name(user_input)
 
-    # Perfect match
+    # Exact
     for t in espn_team_names:
         if normalize_team_name(t) == user_clean:
             return t
 
-    # Strong partial match
+    # Partial
     for t in espn_team_names:
         if user_clean in normalize_team_name(t):
             return t
 
-    # Reverse partial (team name contains user input)
+    # Reverse partial
     for t in espn_team_names:
         if normalize_team_name(t) in user_clean:
             return t
 
-    # Abbreviation/short name handling (UGA, LSU, FSU, BAMA)
+    # Abbreviations
     for t in espn_team_names:
-        abbr = "".join([word[0] for word in t.split() if word[0].isalpha()])
+        abbr = "".join([w[0] for w in t.split() if w])
         if user_clean == abbr.lower():
             return t
 
-    # If nothing matches, return None (handled gracefully later)
     return None
 
-
 def extract_game_from_espn(data, team1, team2):
-    """
-    Given ESPN scoreboard data and user-entered teams,
-    attempt to find the matching live game.
-    """
-    team1_clean = normalize_team_name(team1)
-    team2_clean = normalize_team_name(team2)
+    t1 = normalize_team_name(team1)
+    t2 = normalize_team_name(team2)
 
     for event in data.get("events", []):
         try:
@@ -95,39 +87,25 @@ def extract_game_from_espn(data, team1, team2):
                 comps[1]["team"]["displayName"],
                 comps[1]["team"]["shortName"],
             ]
-
-            # Attempt fuzzy match for both teams
-            match1 = fuzzy_match_team(team1_clean, espn_names)
-            match2 = fuzzy_match_team(team2_clean, espn_names)
-
-            if match1 and match2:
+            m1 = fuzzy_match_team(t1, espn_names)
+            m2 = fuzzy_match_team(t2, espn_names)
+            if m1 and m2:
                 return event
-
-        except Exception:
+        except:
             continue
-
-    return None  # if no matching event found
+    return None
 
 # ============================================================
 # Module 3 — ESPN Live Data Engine
 # ============================================================
 
 def fetch_espn_scoreboard():
-    """
-    Pull the full ESPN College Football scoreboard feed.
-    """
     try:
-        resp = requests.get(ESPN_SCOREBOARD_URL, timeout=5)
-        return resp.json()
+        return requests.get(ESPN_SCOREBOARD_URL, timeout=5).json()
     except Exception as e:
         return {"error": str(e)}
 
-
 def parse_espn_game(event):
-    """
-    Given an ESPN event (single game), extract structured game information.
-    """
-
     try:
         comp = event["competitions"][0]
         competitors = comp["competitors"]
@@ -135,114 +113,76 @@ def parse_espn_game(event):
         home = competitors[0] if competitors[0]["homeAway"] == "home" else competitors[1]
         away = competitors[1] if competitors[0]["homeAway"] == "home" else competitors[0]
 
-        # Basic score info
-        home_team = home["team"]["displayName"]
-        away_team = away["team"]["displayName"]
-        home_score = int(home.get("score", 0))
-        away_score = int(away.get("score", 0))
-
-        # Game status
         status = comp.get("status", {})
-        period = status.get("period")
-        clock = status.get("displayClock")
-        game_status_text = status.get("type", {}).get("description", "Unknown")
-
-        # Possession, down, distance, yard line
         situation = comp.get("situation", {})
-        possession = situation.get("possession")
-        down = situation.get("down")
-        distance = situation.get("distance")
-        yard_line = situation.get("yardLine")  # 50 = midfield
-
-        # Drives (if available)
-        drives = comp.get("drives", {})
 
         parsed = {
-            "home_team": home_team,
-            "away_team": away_team,
-            "home_score": home_score,
-            "away_score": away_score,
-            "period": period,
-            "clock": clock,
-            "status_text": game_status_text,
-            "possession": possession,
-            "down": down,
-            "distance": distance,
-            "yard_line": yard_line,
-            "drives": drives,
+            "home_team": home["team"]["displayName"],
+            "away_team": away["team"]["displayName"],
+            "home_score": int(home.get("score", 0)),
+            "away_score": int(away.get("score", 0)),
+            "period": status.get("period"),
+            "clock": status.get("displayClock"),
+            "status_text": status.get("type", {}).get("description", "Unknown"),
+            "possession": situation.get("possession"),
+            "down": situation.get("down"),
+            "distance": situation.get("distance"),
+            "yard_line": situation.get("yardLine"),
+            "drives": comp.get("drives", {}),
         }
-
         return parsed
-
     except Exception as e:
         return {"error": f"Failed to parse ESPN data: {e}"}
 
 # ============================================================
-# Module 4 — Live Odds Engine (TheOddsAPI)
+# Module 4 — Odds API Engine
 # ============================================================
 
 def fetch_live_odds():
-    """
-    Pull live odds from TheOddsAPI for NCAAF.
-    Returns list of games with multiple book odds.
-    """
-    url = f"{ODDS_API_URL}&apiKey={ODDS_API_KEY}"
     try:
-        resp = requests.get(url, timeout=8)
-        data = resp.json()
-        return data
+        url = f"{ODDS_API_URL}&apiKey={ODDS_API_KEY}"
+        return requests.get(url, timeout=8).json()
     except Exception as e:
         return {"error": f"Odds API request failed: {e}"}
 
-
-def extract_live_odds_for_game(odds_data, team1, team2):
-    """
-    Attempts to match live odds with user-entered game.
-    Returns best spread/total across available books.
-    """
-
-    team1 = team1.lower()
-    team2 = team2.lower()
+def extract_live_odds_for_game(odds_data, t1, t2):
+    t1 = t1.lower()
+    t2 = t2.lower()
 
     for game in odds_data:
         home = game.get("home_team", "").lower()
         away = game.get("away_team", "").lower()
 
-        # fuzzy-ish matching
-        if (team1 in home or team1 in away) and (team2 in home or team2 in away):
-
+        if (t1 in home or t1 in away) and (t2 in home or t2 in away):
             best_spread = None
             best_total = None
             best_ml = None
 
             for book in game.get("bookmakers", []):
-                markets = book.get("markets", [])
+                for m in book.get("markets", []):
+                    key = m["key"]
 
-                for m in markets:
-                    if m["key"] == "spreads":
+                    # Spread
+                    if key == "spreads":
                         try:
-                            o1 = m["outcomes"][0]
-                            o2 = m["outcomes"][1]
-                            # choose best spread based on lower absolute number
-                            candidate = sorted([o1, o2], key=lambda x: abs(x["point"]))[0]
-                            best_spread = candidate
+                            o = sorted(m["outcomes"], key=lambda x: abs(x["point"]))[0]
+                            best_spread = o
                         except:
                             pass
 
-                    if m["key"] == "totals":
+                    # Total
+                    if key == "totals":
                         try:
-                            o1 = m["outcomes"][0]
-                            # choose the total closest to 50 (neutral point)
-                            candidate = o1
-                            best_total = candidate
+                            best_total = m["outcomes"][0]
                         except:
                             pass
 
-                    if m["key"] == "h2h":  # moneyline
+                    # ML
+                    if key == "h2h":
                         try:
-                            o1 = m["outcomes"][0]
-                            o2 = m["outcomes"][1]
-                            best_ml = sorted([o1, o2], key=lambda x: x["price"])[0]
+                            best_ml = sorted(
+                                m["outcomes"], key=lambda x: x["price"]
+                            )[0]
                         except:
                             pass
 
@@ -250,47 +190,27 @@ def extract_live_odds_for_game(odds_data, team1, team2):
                 "best_spread": best_spread,
                 "best_total": best_total,
                 "best_ml": best_ml,
-                "raw": game,
             }
-
     return None
 
 # ============================================================
-# Module 5 — Hybrid GPT Prediction Engine
+# Module 5 — Hybrid GPT Model
 # ============================================================
 
 HYBRID_SYSTEM_PROMPT = """
 You are the Gilmer CFB Hybrid Betting Intelligence Model V3.0.
-You generate ATS and O/U recommendations using:
+Blend:
+- Pregame priors
+- Live ESPN game state
+- Live betting lines
+- Momentum, pace
+- ATS + O/U recommendations
+- Confidence (0–100%)
 
-1. Pregame priors from historical tendencies.
-2. Live ESPN game state (score, time, drives, possession, pace).
-3. Real-time spreads, totals, and odds movement from TheOddsAPI.
-4. Momentum analysis, drive quality, and pace-of-play projections.
-5. Risk-adjusted recommendation logic.
-
-Rules:
-- ALWAYS output a clear ATS pick: team + spread direction.
-- ALWAYS output a clear O/U pick: Over or Under.
-- ALWAYS include a confidence score (0–100%).
-- Keep explanations clean, direct, and analytic.
-- Never complain about missing data; infer rationally when needed.
-- If live data indicates a flipped projection, explicitly state the flip.
-- If pregame and live disagree, prioritize LIVE DATA by 60%, pregame 40%.
-- Provide a short actionable summary up top.
+Prioritize live data 60%, pregame 40%.
 """
 
-def run_hybrid_gpt_model(
-    mode,
-    game,
-    pregame_context,
-    live_game_data=None,
-    live_odds=None
-):
-    """
-    Main GPT engine for hybrid modeling.
-    """
-
+def run_hybrid_gpt_model(mode, game, pregame_context, live_game_data, live_odds):
     live_data_json = json.dumps(live_game_data, indent=2) if live_game_data else "None"
     live_odds_json = json.dumps(live_odds, indent=2) if live_odds else "None"
 
@@ -298,21 +218,21 @@ def run_hybrid_gpt_model(
 Mode: {mode}
 Game: {game}
 
-Pregame Analysis:
+Pregame:
 {pregame_context}
 
-Live Game State:
+Live Data:
 {live_data_json}
 
-Live Market Odds:
+Live Odds:
 {live_odds_json}
 
-Provide:
-1. ATS Prediction
-2. O/U Prediction
-3. Confidence percentage
-4. Reasoning (1–3 tight paragraphs)
-5. A top-summary at the beginning
+Return:
+1. ATS pick
+2. O/U pick
+3. Confidence %
+4. 1–3 paragraph reasoning
+5. A top-action summary
 """
 
     try:
@@ -325,27 +245,16 @@ Provide:
             temperature=0.4,
         )
         return resp.choices[0].message["content"]
-
     except Exception as e:
-        return f"GPT model error: {e}"
+        return f"GPT Error: {e}"
 
 # ============================================================
-# Module 6 — Live Scoreboard Renderer
+# Module 6 — Scoreboard Renderer
 # ============================================================
 
 def render_live_scoreboard(live):
-    """
-    Renders a clean, readable scoreboard for live games.
-    Accepts parsed ESPN game data from Module 3.
-    """
-
     if not live or "error" in live:
-        st.markdown(
-            "<div style='padding:10px; background:#330000; color:#FF7777; border:1px solid #660000; border-radius:8px;'>"
-            "Live game data unavailable or game not found."
-            "</div>",
-            unsafe_allow_html=True
-        )
+        st.error("No live game data available.")
         return
 
     home = live["home_team"]
@@ -357,153 +266,82 @@ def render_live_scoreboard(live):
     possession = live.get("possession")
     down = live.get("down")
     dist = live.get("distance")
-    yardline = live.get("yard_line")
+    yard = live.get("yard_line")
 
-    # Possession marker
-    poss_text = ""
+    poss = ""
     if possession:
         if possession.lower() in home.lower():
-            poss_text = f"🏈 {home} ball"
+            poss = f"🏈 {home} ball"
         elif possession.lower() in away.lower():
-            poss_text = f"🏈 {away} ball"
-    
-    # Field position display
-    field_pos = ""
-    if yardline is not None:
-        if yardline == 50:
-            field_pos = "Midfield (50)"
-        else:
-            # simple display: yard line toward offense
-            field_pos = f"Ball on {yardline}"
+            poss = f"🏈 {away} ball"
 
-    # Down & distance
-    dd_text = ""
+    dd = ""
     if down and dist:
-        ordinal = {1:"1st",2:"2nd",3:"3rd",4:"4th"}.get(down, f"{down}th")
-        dd_text = f"{ordinal} & {dist}"
+        ord_map = {1:"1st",2:"2nd",3:"3rd",4:"4th"}
+        dd = f"{ord_map.get(down, str(down)+'th')} & {dist}"
 
-    # Compose scoreboard block
+    field = ""
+    if yard is not None:
+        field = "Midfield (50)" if yard == 50 else f"Ball on {yard}"
+
     html = f"""
-    <div style='
-        background-color:#1A1A1A;
-        padding:18px;
-        border:1px solid #333;
-        border-radius:10px;
-        margin-top:10px;
-        font-family:Arial, sans-serif;
-    '>
-
-        <h2 style='text-align:center; color:#1A73E8; margin-bottom:8px;'>
-            {away} {as_} — {home} {hs}
-        </h2>
-
-        <h4 style='text-align:center; color:#D4AF37; margin-top:0;'>
-            Q{period} | {clock}
-        </h4>
-
-        <p style='text-align:center; color:#AAAAAA; margin:6px 0;'>
-            {poss_text}
-        </p>
-
-        <p style='text-align:center; color:#AAAAAA; margin:4px 0;'>
-            {dd_text}
-        </p>
-
-        <p style='text-align:center; color:#AAAAAA; margin:4px 0;'>
-            {field_pos}
-        </p>
+    <div style='background:#111; padding:20px; border-radius:10px;'>
+        <h2 style='color:#1A73E8; text-align:center;'>{away} {as_} — {home} {hs}</h2>
+        <h4 style='color:#D4AF37; text-align:center;'>Q{period} | {clock}</h4>
+        <p style='color:#AAA; text-align:center;'>{poss}</p>
+        <p style='color:#AAA; text-align:center;'>{dd}</p>
+        <p style='color:#AAA; text-align:center;'>{field}</p>
     </div>
     """
-
     st.markdown(html, unsafe_allow_html=True)
 
 # ============================================================
-# Module 7 — Auto-Refresh Engine (Live Mode)
-# ============================================================
-
-def auto_refresh_if_live(mode):
-    """
-    Automatically triggers a refresh on the Streamlit app
-    if the user selects Live mode.
-    """
-    if mode.lower() == "live in-game" or mode.lower() == "live":
-        st_autorefresh = st.experimental_rerun  # fallback if needed
-        st_autorefresh_rate = st.autorefresh(interval=AUTO_REFRESH_INTERVAL_MS)
-
-
-# ============================================================
-# Module 8 — PDF Generator (V3.0: Pregame + Live Hybrid)
+# Module 8 — PDF Generator
 # ============================================================
 
 def generate_pdf(game_title, scoreboard_html, odds_data, model_output, logo_base64=None):
-    """
-    Creates a polished PDF report summarizing the hybrid model's output.
-    """
-
     pdf = FPDF()
     pdf.add_page()
 
-    # Register fonts (DejaVu supports UTF-8)
     pdf.add_font("DejaVu", "", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", uni=True)
     pdf.add_font("DejaVu", "B", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", uni=True)
 
-    # Header Title
     pdf.set_font("DejaVu", "B", 18)
     pdf.cell(0, 10, "Gilmer CFB Betting Intelligence Report", ln=True, align="C")
     pdf.ln(5)
 
-    # Logo (optional)
     if logo_base64:
-        temp_logo_path = "temp_logo_v3.png"
-        with open(temp_logo_path, "wb") as f:
+        with open("temp_logo.png", "wb") as f:
             f.write(base64.b64decode(logo_base64))
-        pdf.image(temp_logo_path, x=80, w=40)
+        pdf.image("temp_logo.png", x=80, w=40)
         pdf.ln(10)
 
-    # Game Title
     pdf.set_font("DejaVu", "B", 14)
     pdf.cell(0, 8, f"Game: {game_title}", ln=True)
     pdf.ln(2)
 
-    # Timestamp
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     pdf.set_font("DejaVu", "", 10)
-    pdf.cell(0, 6, f"Generated: {timestamp}", ln=True)
+    pdf.cell(0, 6, f"Generated: {datetime.now()}", ln=True)
     pdf.ln(8)
 
-    # Live Scoreboard Block
     pdf.set_font("DejaVu", "B", 12)
-    pdf.cell(0, 8, "Live Scoreboard Snapshot:", ln=True)
+    pdf.cell(0, 8, "Live Scoreboard:", ln=True)
     pdf.set_font("DejaVu", "", 10)
     pdf.multi_cell(0, 5, scoreboard_html)
-    pdf.ln(4)
+    pdf.ln(5)
 
-    # Live Odds
     pdf.set_font("DejaVu", "B", 12)
     pdf.cell(0, 8, "Live Odds:", ln=True)
     pdf.set_font("DejaVu", "", 10)
     pdf.multi_cell(0, 5, json.dumps(odds_data, indent=2))
     pdf.ln(5)
 
-    # Model Output
     pdf.set_font("DejaVu", "B", 12)
     pdf.cell(0, 8, "Model Output:", ln=True)
     pdf.set_font("DejaVu", "", 10)
     pdf.multi_cell(0, 5, model_output)
-    pdf.ln(5)
 
-    # Footer
-    pdf.set_font("DejaVu", "", 9)
-    pdf.ln(8)
-    pdf.cell(
-        0,
-        5,
-        "If you can outperform this model, you should be selling your own.",
-        ln=True,
-        align="C",
-    )
-
-    out_path = f"gilmer_v3_report.pdf"
+    out_path = "gilmer_v3_report.pdf"
     pdf.output(out_path)
     return out_path
 
@@ -512,169 +350,107 @@ def generate_pdf(game_title, scoreboard_html, odds_data, model_output, logo_base
 # ============================================================
 
 def load_logo_base64():
-    """Load logo.png as Base64 string if it exists."""
     if not os.path.exists("logo.png"):
         return None
     with open("logo.png", "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
-
+        return base64.b64encode(f.read()).decode()
 
 def display_header():
-    """Top branding header."""
     logo_b64 = load_logo_base64()
-
     if logo_b64:
         st.markdown(
-            f"""
-            <div style='text-align:center; margin-top:-20px;'>
-                <img src='data:image/png;base64,{logo_b64}' width='140'>
-            </div>
-            """,
+            f"<div style='text-align:center;'><img src='data:image/png;base64,{logo_b64}' width='140'></div>",
             unsafe_allow_html=True,
         )
 
     st.markdown(
         """
         <h1 style='text-align:center; color:#1a73e8;'>Gilmer CFB Betting Intelligence Model V3.0</h1>
-        <h4 style='text-align:center; margin-top:-10px;'>Engineered by Matthew Gilmer</h4>
-        <p style='text-align:center; color:#999; margin-top:-8px;'>
-            Hybrid Pregame + Live ATS & O/U Prediction Engine
-        </p>
+        <h4 style='text-align:center;'>Engineered by Matthew Gilmer</h4>
         <hr>
         """,
         unsafe_allow_html=True,
     )
 
-
 def run_ui():
-    """Main UI controller for streamlit."""
-
     display_header()
 
-    # Mode selection
     mode = st.selectbox("Betting Mode:", ["Pregame", "Live In-Game"])
-
-    # Game input
-    game_input = st.text_input(
-        "Which game do you want evaluated? (Example: Alabama vs Georgia)"
-    )
-
+    game_input = st.text_input("Which game do you want evaluated? (Example: Alabama vs Georgia)")
     run_button = st.button("Run Analysis", use_container_width=True)
 
-    # Live auto-refresh (Module 7 usage)
     if mode == "Live In-Game":
         st.autorefresh(interval=AUTO_REFRESH_INTERVAL_MS)
 
-    if not run_button:
-        return  # do nothing until user clicks
+    if run_button:
+        if "vs" not in game_input.lower():
+            st.error("Format must be: Team1 vs Team2")
+            return
 
-    if "vs" not in game_input.lower():
-        st.error("Please enter game format: Team1 vs Team2")
-        return
+        t1, t2 = [x.strip() for x in game_input.split("vs")]
 
-    team1, team2 = [x.strip() for x in game_input.split("vs")]
+        st.session_state["should_run_pipeline"] = True
+        st.session_state["team1"] = t1
+        st.session_state["team2"] = t2
+        st.session_state["mode"] = mode
+
+        st.experimental_rerun()
 
 # ============================================================
 # Module 10 — Main Execution Engine
 # ============================================================
 
 def execute_full_pipeline(mode, team1, team2):
-    """
-    Orchestrates the full Pregame + Live hybrid pipeline.
-    """
+    pregame_context = f"Evaluating {team1} vs {team2} in {mode} mode."
 
-    # --------------------------------------------------------
-    # PREGAME CONTEXT (light placeholder — can be expanded)
-    # --------------------------------------------------------
-    pregame_context = f"User requested analysis for {team1} vs {team2}. Mode: {mode}."
-
-    # --------------------------------------------------------
-    # LIVE MODE: pull ESPN + odds + scoreboard
-    # --------------------------------------------------------
     live_game_data = None
-    live_odds_data = None
-    matched_event = None
+    live_odds = None
 
     if mode == "Live In-Game":
-        # 1. ESPN scoreboard
         scoreboard = fetch_espn_scoreboard()
+        evt = extract_game_from_espn(scoreboard, team1, team2)
 
-        matched_event = extract_game_from_espn(scoreboard, team1, team2)
-        if matched_event:
-            live_game_data = parse_espn_game(matched_event)
+        if evt:
+            live_game_data = parse_espn_game(evt)
 
-        # 2. Odds
         odds_raw = fetch_live_odds()
-        live_odds_data = extract_live_odds_for_game(odds_raw, team1, team2)
+        live_odds = extract_live_odds_for_game(odds_raw, team1, team2)
 
-    # --------------------------------------------------------
-    # Run Hybrid Model
-    # --------------------------------------------------------
-    model_output = run_hybrid_gpt_model(
-        mode=mode,
-        game=f"{team1} vs {team2}",
-        pregame_context=pregame_context,
-        live_game_data=live_game_data,
-        live_odds=live_odds_data,
+    result = run_hybrid_gpt_model(
+        mode,
+        f"{team1} vs {team2}",
+        pregame_context,
+        live_game_data,
+        live_odds,
     )
 
-    # --------------------------------------------------------
-    # Display Scoreboard (if live)
-    # --------------------------------------------------------
-    scoreboard_text = "No live data."
     if live_game_data:
         render_live_scoreboard(live_game_data)
-        scoreboard_text = json.dumps(live_game_data, indent=2)
 
-    # --------------------------------------------------------
-    # Display Odds (if present)
-    # --------------------------------------------------------
-    if live_odds_data:
-        st.subheader("Live Market Odds")
-        st.json(live_odds_data)
-
-    # --------------------------------------------------------
-    # Display Model Output
-    # --------------------------------------------------------
     st.subheader("Model Output")
-    st.write(model_output)
+    st.write(result)
 
-    # --------------------------------------------------------
-    # PDF Generation
-    # --------------------------------------------------------
     logo_b64 = load_logo_base64()
-    pdf_path = generate_pdf(
-        game_title=f"{team1} vs {team2}",
-        scoreboard_html=scoreboard_text,
-        odds_data=live_odds_data,
-        model_output=model_output,
-        logo_base64=logo_b64,
+    pdf = generate_pdf(
+        f"{team1} vs {team2}",
+        json.dumps(live_game_data, indent=2) if live_game_data else "No live data",
+        live_odds,
+        result,
+        logo_b64,
     )
 
-    with open(pdf_path, "rb") as f:
-        st.download_button(
-            label="Download PDF Report",
-            data=f,
-            file_name="gilmer_v3_report.pdf",
-            mime="application/pdf",
-        )
-
-
-# ============================================================
-# MAIN ENTRYPOINT — RUN UI & PIPELINE
-# ============================================================
+    with open(pdf, "rb") as f:
+        st.download_button("Download PDF Report", f, "gilmer_v3_report.pdf")
 
 def main():
     run_ui()
 
-    # After UI input triggers "Run Analysis", execution resumes here
     if st.session_state.get("should_run_pipeline"):
-        mode = st.session_state["mode"]
-        team1 = st.session_state["team1"]
-        team2 = st.session_state["team2"]
-        execute_full_pipeline(mode, team1, team2)
+        execute_full_pipeline(
+            st.session_state["mode"],
+            st.session_state["team1"],
+            st.session_state["team2"],
+        )
 
-
-# Required for Streamlit execution
 if __name__ == "__main__":
     main()
