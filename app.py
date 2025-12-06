@@ -27,7 +27,15 @@ st.set_page_config(
 )
 
 # Display logo
-st.image("logo.png", width=180)
+st.markdown(
+    """
+    <div style='text-align: center;'>
+        <img src='logo.png' width='180'>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
 
 
 
