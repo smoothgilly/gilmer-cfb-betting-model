@@ -1,10 +1,10 @@
 import streamlit as st
-import openai
+from openai import OpenAI
 import os
 import time
 
-# Initialize OpenAI API key
-openai.api_key = os.environ["OPENAI_API_KEY"]
+# Initialize OpenAI client (correct for new SDK)
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 # -----------------------------
 # System Prompt (ASCII ONLY)
@@ -67,8 +67,8 @@ if st.button("Run Analysis", use_container_width=True):
             Run the full analysis according to the system instructions.
             """
 
-            # Correct OpenAI API call
-            response = openai.ChatCompletion.create(
+            # CORRECT OPENAI CALL FOR NEW SDK
+            response = client.chat.completions.create(
                 model="gpt-4.1",
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
@@ -77,9 +77,9 @@ if st.button("Run Analysis", use_container_width=True):
                 temperature=0.3,
             )
 
-            output = response["choices"][0]["message"]["content"]
+            output = response.choices[0].message.content
 
-            # Nicely formatted output box
+            # Output box
             result_box.markdown(
                 f"""
                 <div style='padding: 20px; border-radius: 10px; background-color: #f7f9fc; border: 1px solid #dfe3e8;'>
@@ -90,7 +90,5 @@ if st.button("Run Analysis", use_container_width=True):
                 unsafe_allow_html=True
             )
 
-            # Copyable code block
             st.code(output, language='text')
-
-            st.success("Analysis complete. You can copy the model output using the copy button.")
+            st.success("Analysis complete. You can copy the model output above using the copy button.")
