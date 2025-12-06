@@ -26,6 +26,10 @@ st.set_page_config(
     page_icon="🏈",
 )
 
+# Display logo
+st.image("logo.png", width=180)
+
+
 # -----------------------------
 # Header Section
 # -----------------------------
