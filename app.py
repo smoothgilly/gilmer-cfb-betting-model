@@ -84,7 +84,7 @@ st.set_page_config(
 
 
 # ---------------------------------------------------------
-# Display Logo
+# Display Centered Logo
 # ---------------------------------------------------------
 if logo_base64:
     st.markdown(
@@ -136,16 +136,15 @@ def extract_top_play(model_output):
 
 
 # ---------------------------------------------------------
-# Generate UTF-8 Safe PDF (FPDF2)
+# Generate PDF (UTF-8 Safe, No Italics)
 # ---------------------------------------------------------
 def generate_pdf(game_title, summary_tuple, full_analysis, logo_base64):
     pdf = FPDF()
     pdf.add_page()
 
-    # Register all required fonts (Regular, Bold, Italic)
+    # Register REGULAR + BOLD only (italic removed)
     pdf.add_font("DejaVu", "", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", uni=True)
     pdf.add_font("DejaVu", "B", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", uni=True)
-    pdf.add_font("DejaVu", "I", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf", uni=True)
 
     # Title
     pdf.set_font("DejaVu", "B", 18)
@@ -154,10 +153,10 @@ def generate_pdf(game_title, summary_tuple, full_analysis, logo_base64):
 
     # Logo
     if logo_base64:
-        temp_logo_path = "temp_logo.png"
-        with open(temp_logo_path, "wb") as f:
+        temp_logo = "temp_logo.png"
+        with open(temp_logo, "wb") as f:
             f.write(base64.b64decode(logo_base64))
-        pdf.image(temp_logo_path, x=75, w=50)
+        pdf.image(temp_logo, x=75, w=50)
 
     pdf.ln(10)
 
@@ -165,7 +164,7 @@ def generate_pdf(game_title, summary_tuple, full_analysis, logo_base64):
     pdf.set_font("DejaVu", "B", 14)
     pdf.cell(0, 10, game_title, ln=True)
 
-    # Summary box
+    # Summary Box
     ats, ou, conf = summary_tuple
     pdf.set_draw_color(180, 180, 180)
     pdf.rect(10, pdf.get_y(), 190, 28)
@@ -177,23 +176,22 @@ def generate_pdf(game_title, summary_tuple, full_analysis, logo_base64):
     pdf.cell(0, 8, f"Confidence: {conf}", ln=True)
     pdf.ln(5)
 
-    # Full analysis
+    # Full Analysis
     pdf.set_font("DejaVu", "", 11)
     pdf.multi_cell(0, 6, full_analysis)
 
-    # Footer tagline
+    # Footer (regular font — NO italic)
     pdf.ln(6)
-    pdf.set_font("DejaVu", "I", 10)
+    pdf.set_font("DejaVu", "", 10)
     pdf.cell(0, 8, "If you can outperform this model, you should be selling your own.", ln=True, align="C")
 
-    # Save PDF
     output_path = "report.pdf"
     pdf.output(output_path)
     return output_path
 
 
 # ---------------------------------------------------------
-# RUN ANALYSIS BUTTON
+# RUN ANALYSIS
 # ---------------------------------------------------------
 if st.button("Run Analysis", use_container_width=True):
 
@@ -219,7 +217,7 @@ if st.button("Run Analysis", use_container_width=True):
             # Extract summary
             ats, ou, conf = extract_top_play(full_output)
 
-            # Summary box (top)
+            # Summary Box
             summary_box.markdown(
                 f"""
                 <div style='padding:15px; background-color:#1A1A1A; border:1px solid #333; border-radius:10px;'>
@@ -232,7 +230,7 @@ if st.button("Run Analysis", use_container_width=True):
                 unsafe_allow_html=True
             )
 
-            # Full output
+            # Full Analysis Box
             result_box.markdown(
                 f"""
                 <div style='padding:20px; background-color:#1A1A1A; border:1px solid #333; border-radius:10px; margin-top:15px;'>
