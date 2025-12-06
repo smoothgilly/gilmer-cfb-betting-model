@@ -1232,3 +1232,10 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# (existing bottom of file)
+if __name__ == "__main__":
+    main()
+
+# Add one blank line:
+
