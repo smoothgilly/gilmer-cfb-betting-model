@@ -6,13 +6,15 @@ import base64
 from fpdf import FPDF
 from datetime import datetime
 
+
 # ---------------------------------------------------------
-# Initialize OpenAI client (new key will be provided later)
+# Initialize OpenAI client (will use your Streamlit secret)
 # ---------------------------------------------------------
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
+
 # ---------------------------------------------------------
-# DARK MODE THEME (DM1 Matte Black Sportsbook Aesthetic)
+# DARK MODE THEME (DM1 Matte Black)
 # ---------------------------------------------------------
 st.markdown(
     """
@@ -21,15 +23,14 @@ st.markdown(
             background-color: #0D0D0D !important;
             color: #EAEAEA !important;
         }
-        .stTextInput>div>div>input {
+
+        .stTextInput>div>div>input,
+        .stSelectbox>div>div>div {
             background-color: #1C1C1C !important;
             color: #EAEAEA !important;
             border: 1px solid #333333 !important;
         }
-        .stSelectbox>div>div>div {
-            background-color: #1C1C1C !important;
-            color: #EAEAEA !important;
-        }
+
         .stButton>button {
             background-color: #1A73E8 !important;
             color: white !important;
@@ -37,9 +38,11 @@ st.markdown(
             padding: 0.5rem 1rem !important;
             border: none !important;
         }
+
         h1, h2, h3, h4 {
             color: #EAEAEA !important;
         }
+
         hr {
             border: 1px solid #333333 !important;
         }
@@ -48,8 +51,9 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+
 # ---------------------------------------------------------
-# Load Logo as Base64
+# Load Logo (Base64)
 # ---------------------------------------------------------
 def load_logo():
     try:
@@ -59,6 +63,7 @@ def load_logo():
         return None
 
 logo_base64 = load_logo()
+
 
 # ---------------------------------------------------------
 # System Prompt
@@ -71,6 +76,7 @@ Before beginning any analysis, you must ask:
 2. "Which game do you want evaluated?"
 """
 
+
 # ---------------------------------------------------------
 # Streamlit Page Setup
 # ---------------------------------------------------------
@@ -79,6 +85,7 @@ st.set_page_config(
     layout="centered",
     page_icon="🏈",
 )
+
 
 # ---------------------------------------------------------
 # Display Centered Logo
@@ -92,6 +99,7 @@ if logo_base64:
         """,
         unsafe_allow_html=True
     )
+
 
 # ---------------------------------------------------------
 # Header Section
@@ -108,80 +116,86 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+
 # ---------------------------------------------------------
 # User Inputs
 # ---------------------------------------------------------
 mode = st.selectbox("Select bet type:", ["Pregame", "Live In-Game"])
 game = st.text_input("Enter the game (e.g., 'Alabama vs LSU'):")
 
-result_box = st.empty()
 summary_box = st.empty()
+result_box = st.empty()
 pdf_box = st.empty()
 
-# ---------------------------------------------------------
-# Extract Top Play Summary from model output
-# ---------------------------------------------------------
-def extract_top_play(text):
-    lines = text.split("\n")
-    ats = next((l for l in lines if "ATS" in l or "spread" in l.lower()), "ATS pick: Not Detected")
-    ou = next((l for l in lines if "Over" in l or "Under" in l), "O/U pick: Not Detected")
-    conf = next((l for l in lines if "confidence" in l.lower()), "Confidence: Not Detected")
-    return ats.strip(), ou.strip(), conf.strip()
 
 # ---------------------------------------------------------
-# Generate PDF Report
+# Extract Top Play Summary
+# ---------------------------------------------------------
+def extract_top_play(model_output):
+    lines = model_output.split("\n")
+    ats = next((l for l in lines if "ATS" in l or "spread" in l.lower()), "ATS pick: Not detected")
+    ou = next((l for l in lines if "Over" in l or "Under" in l), "O/U pick: Not detected")
+    conf = next((l for l in lines if "confidence" in l.lower()), "Confidence: Not detected")
+    return ats.strip(), ou.strip(), conf.strip()
+
+
+# ---------------------------------------------------------
+# Generate UTF-8 Safe PDF (FPDF2)
 # ---------------------------------------------------------
 def generate_pdf(game_title, summary_tuple, full_analysis, logo_base64):
     pdf = FPDF()
     pdf.add_page()
 
-    # Title Area
-    pdf.set_font("Arial", "B", 18)
+    # Register UTF-8 font
+    pdf.add_font("DejaVu", "", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", uni=True)
+    pdf.set_font("DejaVu", "", 14)
+
+    # Title
+    pdf.set_font("DejaVu", "B", 18)
     pdf.cell(0, 10, "Gilmer CFB Betting Intelligence Report", ln=True, align="C")
+    pdf.ln(5)
 
     # Logo
     if logo_base64:
-        logo_path = "temp_logo.png"
-        with open(logo_path, "wb") as f:
+        temp_logo_path = "temp_logo.png"
+        with open(temp_logo_path, "wb") as f:
             f.write(base64.b64decode(logo_base64))
-        pdf.image(logo_path, x=75, w=50)
+        pdf.image(temp_logo_path, x=75, w=50)
 
     pdf.ln(10)
 
     # Game Title
-    pdf.set_font("Arial", "B", 14)
+    pdf.set_font("DejaVu", "B", 14)
     pdf.cell(0, 10, game_title, ln=True)
 
-    # Border Box for Summary
-    pdf.set_draw_color(180, 180, 180)
-    pdf.set_line_width(0.3)
-    pdf.rect(10, pdf.get_y(), 190, 30)
-
-    # Summary Section
-    pdf.set_font("Arial", "", 12)
+    # Summary box with border
     ats, ou, conf = summary_tuple
+    pdf.set_draw_color(180, 180, 180)
+    pdf.rect(10, pdf.get_y(), 190, 28)
 
-    pdf.ln(3)
+    pdf.ln(4)
+    pdf.set_font("DejaVu", "", 12)
     pdf.cell(0, 8, f"Top ATS Pick: {ats}", ln=True)
     pdf.cell(0, 8, f"Top O/U Pick: {ou}", ln=True)
     pdf.cell(0, 8, f"Confidence: {conf}", ln=True)
     pdf.ln(5)
 
-    # Full Analysis Section
-    pdf.set_font("Arial", "", 11)
+    # Full Analysis
+    pdf.set_font("DejaVu", "", 11)
     pdf.multi_cell(0, 6, full_analysis)
 
-    # Footer Message
-    pdf.ln(10)
-    pdf.set_font("Arial", "I", 10)
+    # Footer
+    pdf.ln(6)
+    pdf.set_font("DejaVu", "I", 10)
     pdf.cell(0, 8, "If you can outperform this model, you should be selling your own.", ln=True, align="C")
 
-    pdf_output = "report.pdf"
-    pdf.output(pdf_output)
-    return pdf_output
+    pdf_path = "report.pdf"
+    pdf.output(pdf_path)
+    return pdf_path
+
 
 # ---------------------------------------------------------
-# Run Button
+# RUN ANALYSIS BUTTON
 # ---------------------------------------------------------
 if st.button("Run Analysis", use_container_width=True):
 
@@ -204,13 +218,13 @@ if st.button("Run Analysis", use_container_width=True):
 
             full_output = response.choices[0].message.content
 
-            # Extract Top Play Summary
+            # Summary extraction
             ats, ou, conf = extract_top_play(full_output)
 
-            # Display Top Play Summary
+            # SUMMARY BOX (Top of app)
             summary_box.markdown(
                 f"""
-                <div style='padding:15px; background-color:#1A1A1A; border:1px solid #333333; border-radius:10px; margin-top:10px;'>
+                <div style='padding:15px; background-color:#1A1A1A; border:1px solid #333; border-radius:10px;'>
                     <h3 style='color:#D4AF37;'>Top Play Summary</h3>
                     <p>{ats}</p>
                     <p>{ou}</p>
@@ -220,10 +234,10 @@ if st.button("Run Analysis", use_container_width=True):
                 unsafe_allow_html=True
             )
 
-            # Display Analysis Box
+            # FULL ANALYSIS
             result_box.markdown(
                 f"""
-                <div style='padding:20px; border-radius:10px; background-color:#1A1A1A; border:1px solid #333333; margin-top:10px;'>
+                <div style='padding:20px; background-color:#1A1A1A; border:1px solid #333; border-radius:10px; margin-top:15px;'>
                     <h3 style='color:#1A73E8;'>Full Model Output</h3>
                     <pre style='white-space: pre-wrap; font-size:15px;'>{full_output}</pre>
                 </div>
@@ -231,9 +245,9 @@ if st.button("Run Analysis", use_container_width=True):
                 unsafe_allow_html=True
             )
 
-            # PDF Export
-            pdf_path = generate_pdf(game, (ats, ou, conf), full_output, logo_base64)
-            with open(pdf_path, "rb") as f:
+            # PDF EXPORT
+            pdf_file = generate_pdf(game, (ats, ou, conf), full_output, logo_base64)
+            with open(pdf_file, "rb") as f:
                 pdf_box.download_button(
                     label="Download PDF Report",
                     data=f,
