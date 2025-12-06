@@ -382,7 +382,7 @@ def run_ui():
     if mode == "Live In-Game":
         st.autorefresh(interval=AUTO_REFRESH_INTERVAL_MS)
 
-    if run_button:
+        if run_button:
         if "vs" not in game_input.lower():
             st.error("Format must be: Team1 vs Team2")
             return
@@ -394,7 +394,8 @@ def run_ui():
         st.session_state["team2"] = t2
         st.session_state["mode"] = mode
 
-        st.experimental_rerun()
+        st.rerun()   # <— FIXED
+
 
 # ============================================================
 # Module 10 — Main Execution Engine
